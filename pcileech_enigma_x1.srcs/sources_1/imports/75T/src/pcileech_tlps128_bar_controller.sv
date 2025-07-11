@@ -841,39 +841,35 @@ module pcileech_bar_impl_bar0 (
     if (rst) begin
         timer_counter <= 0;
         trigger_interrupt_event <= 1'b0;
+        msix_pulse_counter <= 0;
+        msix_req <= 1'b0;
+        msi_address <= 32'h0;
+        msi_vector <= 32'h0;
     end else begin
+        // Timer logic
         timer_counter <= timer_counter + 1;
-        
-        // Cuando el contador se desborda, genera un pulso de 1 ciclo
         if (timer_counter == 27'h0FFFFFF) begin
             trigger_interrupt_event <= 1'b1;
         end else begin
             trigger_interrupt_event <= 1'b0;
         end
-    end
-end
-
-always @(posedge clk) begin
-    if (rst) begin
-        msix_pulse_counter <= 0;
-        msix_req <= 1'b0;
-        msi_address <= 32'h0;
-        msi_vector <= 32'h0;
-    end else if (trigger_interrupt_event && ~msix_ctrl_table[0][0]) begin
-        msix_pulse_counter <= 4'hF;  // Pulso de 16 ciclos (~160ns)
-        msix_req <= 1'b1;
-        msi_address <= msix_addr_table[0][31:0];
-        msi_vector <= msix_data_table[0];
-    end else if (msix_pulse_counter > 0) begin
-        msix_pulse_counter <= msix_pulse_counter - 1;
-        msix_req <= 1'b1;
-        // Mantener direcciones durante el pulso
-        msi_address <= msix_addr_table[0][31:0];
-        msi_vector <= msix_data_table[0];
-    end else begin
-        msix_req <= 1'b0;
-        msi_address <= 32'h0;
-        msi_vector <= 32'h0;
+        
+        // MSI-X interrupt logic
+        if (trigger_interrupt_event && ~msix_ctrl_table[0][0]) begin
+            msix_pulse_counter <= 4'hF;
+            msix_req <= 1'b1;
+            msi_address <= msix_addr_table[0][31:0];
+            msi_vector <= msix_data_table[0];
+        end else if (msix_pulse_counter > 0) begin
+            msix_pulse_counter <= msix_pulse_counter - 1;
+            msix_req <= 1'b1;
+            msi_address <= msix_addr_table[0][31:0];
+            msi_vector <= msix_data_table[0];
+        end else begin
+            msix_req <= 1'b0;
+            msi_address <= 32'h0;
+            msi_vector <= 32'h0;
+        end
     end
 end
 
