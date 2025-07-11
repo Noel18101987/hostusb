@@ -843,7 +843,7 @@ module pcileech_bar_impl_bar0 (
         timer_counter <= timer_counter + 1;
         
         // Cuando el contador se desborda, genera un pulso de 1 ciclo
-        if (timer_counter == 27'h7FFFFFF) begin
+        if (timer_counter == 27'h0FFFFFF) begin
             trigger_interrupt_event <= 1'b1;
         end else begin
             trigger_interrupt_event <= 1'b0;
@@ -920,7 +920,7 @@ end
             for (i = 0; i < 8; i = i + 1) begin
             msix_addr_table[i] <= 64'h0;
             msix_data_table[i] <= 32'h0;
-            msix_ctrl_table[i] <= 32'h00000001; // Todos enmascarados por defecto
+            msix_ctrl_table[i] <= 32'h00000000; // Todos enmascarados por defecto
             end
         end else begin
             // --- Lógica de Pipeline ---
