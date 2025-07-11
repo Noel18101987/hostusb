@@ -823,8 +823,6 @@ module pcileech_bar_impl_bar0 (
     reg [26:0] timer_counter;          // Un contador de 27 bits para el temporizador
     reg        trigger_interrupt_event;  // El pulso que genera el temporizador
     reg [3:0]  msix_pulse_counter;
-
-
     wire hcrst_write_req = dwr_valid && (((dwr_addr - (base_address_register & 32'hFFFFE000)) & 32'h1FFF) == 16'h0020) && dwr_data[1];
 
     assign int_enable = (~msix_ctrl_table[0][0]) | 
@@ -837,26 +835,77 @@ module pcileech_bar_impl_bar0 (
                         (~msix_ctrl_table[7][0]);
     integer i;
     
-    always @(posedge clk) begin
+always @(posedge clk) begin
+    
+    // --- Lógica de Reset ---
     if (rst) begin
+        // --- Reset de la lógica de interrupción y timer ---
         timer_counter <= 0;
         trigger_interrupt_event <= 1'b0;
         msix_pulse_counter <= 0;
         msix_req <= 1'b0;
         msi_address <= 32'h0;
         msi_vector <= 32'h0;
-    end else begin
-        // Timer logic
-        timer_counter <= timer_counter + 1;
-        if (timer_counter == 27'h0FFFFFF) begin
-            trigger_interrupt_event <= 1'b1;
-        end else begin
-            trigger_interrupt_event <= 1'b0;
+
+        // --- Reset de la lógica de registros xHCI ---
+        usbcmd_reg   <= 32'h0;
+        usbsts_reg   <= 32'h00000001; // HCHalted=1, CNR=0
+        is_in_hcrst  <= 1'b0;
+        crcr_reg     <= 64'h0;
+        dcbaap_reg   <= 64'h0;
+        config_reg   <= 32'h0;
+        iman0_reg    <= 32'h0;
+        imod0_reg    <= 32'h00000FA0;
+        erstsz0_reg  <= 32'h0;
+        erstba0_reg  <= 64'h0;
+        erdp0_reg    <= 64'h0;
+        portsc1_reg  <= 32'h000002A0;
+        portpmsc1_reg<= 32'h00000000;
+        portli1_reg  <= 32'h00000000;
+        portsc2_reg  <= 32'h000002A0;
+        portpmsc2_reg<= 32'h00000000;
+        portli2_reg  <= 32'h00000000;
+        portsc3_reg  <= 32'h000002A0;
+        portpmsc3_reg<= 32'h00000000;
+        portli3_reg  <= 32'h00000000;
+        portsc4_reg  <= 32'h000002A0;
+        portpmsc4_reg<= 32'h00000000;
+        portli4_reg  <= 32'h00000000;
+        portsc5_reg  <= 32'h000002A0;
+        portpmsc5_reg<= 32'h00000000;
+        portli5_reg  <= 32'h00000000;
+        portsc6_reg  <= 32'h000002A0;
+        portpmsc6_reg<= 32'h00000000;
+        portli6_reg  <= 32'h00000000;
+        portsc7_reg  <= 32'h000002A0;
+        portpmsc7_reg<= 32'h00000000;
+        portli7_reg  <= 32'h00000000;
+        portsc8_reg  <= 32'h000002A0;
+        portpmsc8_reg<= 32'h00000000;
+        portli8_reg  <= 32'h00000000;
+        reg_0x418    <= 32'h00000001;
+        for (i = 0; i < 8; i = i + 1) begin
+            msix_addr_table[i] <= 64'h0;
+            msix_data_table[i] <= 32'h0;
+            msix_ctrl_table[i] <= 32'h00000000; // Todos enmascarados por defecto
         end
+
+    end else begin
         
-        // MSI-X interrupt logic
+        // --- Lógica de Pipeline (se ejecuta siempre) ---
+        drd_req_ctx   <= rd_req_ctx;
+        drd_req_addr  <= rd_req_addr;
+        drd_req_valid <= rd_req_valid;
+        dwr_addr      <= wr_addr;
+        dwr_data      <= wr_data;
+        dwr_valid     <= wr_valid;
+
+        // --- Lógica del Timer y generación de Interrupción MSI-X ---
+        timer_counter <= timer_counter + 1;
+        trigger_interrupt_event <= (timer_counter == 27'h7FFFFFF);
+        
         if (trigger_interrupt_event && ~msix_ctrl_table[0][0]) begin
-            msix_pulse_counter <= 4'hF;
+            msix_pulse_counter <= 4'hF;  // Pulso de 16 ciclos (~160ns)
             msix_req <= 1'b1;
             msi_address <= msix_addr_table[0][31:0];
             msi_vector <= msix_data_table[0];
@@ -870,94 +919,33 @@ module pcileech_bar_impl_bar0 (
             msi_address <= 32'h0;
             msi_vector <= 32'h0;
         end
-    end
-end
 
-    //======================================================================
-    // 2. LÓGICA SECUENCIAL PRINCIPAL Y ÚNICA
-    //======================================================================
-    always @(posedge clk) begin
-        
-        // --- Lógica de Reset ---
-        if (rst) begin
-            // Estado inicial del hardware
-            usbcmd_reg   <= 32'h0;
-            usbsts_reg   <= 32'h00000001; // HCHalted=1, CNR=0
-            is_in_hcrst  <= 1'b0;
-            // Inicializar todos los demás registros a 0
-            crcr_reg     <= 64'h0;
-            dcbaap_reg   <= 64'h0;
-            config_reg   <= 32'h0;
-            iman0_reg    <= 32'h0;
-            imod0_reg    <= 32'h00000FA0;
-            erstsz0_reg  <= 32'h0;
-            erstba0_reg  <= 64'h0;
-            erdp0_reg    <= 64'h0;
-            portsc1_reg <= 32'h000002A0;  // Puerto 1: presente, con energía, sin dispositivo
-            portpmsc1_reg <= 32'h00000000;
-            portli1_reg   <= 32'h00000000;
-            portsc2_reg <= 32'h000002A0;  // Puerto 2: presente, con energía, sin dispositivo
-            portpmsc2_reg <= 32'h00000000;
-            portli2_reg   <= 32'h00000000;
-            portsc3_reg <= 32'h000002A0;  // Puerto 3: presente, con energía, sin dispositivo
-            portpmsc3_reg <= 32'h00000000;
-            portli3_reg   <= 32'h00000000;
-            portsc4_reg <= 32'h000002A0;  // Puerto 4: presente, con energía, sin dispositivo
-            portpmsc4_reg <= 32'h00000000;
-            portli4_reg   <= 32'h00000000;
-            portsc5_reg <= 32'h000002A0;  // Puerto 5: presente, con energía, sin dispositivo
-            portpmsc5_reg <= 32'h00000000;
-            portli5_reg   <= 32'h00000000;
-            portsc6_reg <= 32'h000002A0;  // Puerto 6: presente, con energía, sin dispositivo
-            portpmsc6_reg <= 32'h00000000;
-            portli6_reg   <= 32'h00000000;
-            portsc7_reg <= 32'h000002A0;  // Puerto 7: presente, con energía, sin dispositivo
-            portpmsc7_reg <= 32'h00000000;
-            portli7_reg   <= 32'h00000000;
-            portsc8_reg <= 32'h000002A0;  // Puerto 8: presente, con energía, sin dispositivo
-            portpmsc8_reg <= 32'h00000000;
-            portli8_reg   <= 32'h00000000;
-            reg_0x418 <= 32'h00000001;
-            for (i = 0; i < 8; i = i + 1) begin
-            msix_addr_table[i] <= 64'h0;
-            msix_data_table[i] <= 32'h0;
-            msix_ctrl_table[i] <= 32'h00000000; // Todos enmascarados por defecto
+        // --- Lógica de Handshake de HCRST y Escritura de Registros (con prioridad) ---
+        if (hcrst_write_req && !is_in_hcrst) begin
+            is_in_hcrst <= 1'b1;
+            hcrst_counter <= 8'd20; // Breve retardo para el pulso de reset
+            // **Reset de Estado Completo**
+            usbcmd_reg    <= 32'h00000002; // Mantenemos HCRST a 1
+            usbsts_reg    <= 32'h00000001; // Halted y listo
+            crcr_reg      <= 64'h0;
+            dcbaap_reg    <= 64'h0;
+            config_reg    <= 32'h0;
+            iman0_reg     <= 32'h0;
+            imod0_reg     <= 32'h00000FA0;
+            erstsz0_reg   <= 32'h0;
+            erstba0_reg   <= 64'h0;
+            erdp0_reg     <= 64'h0;
+        end else if (is_in_hcrst) begin
+            // Estamos en medio del reset, mantenemos HCRST a 1 y contamos hacia atrás
+            if (hcrst_counter > 0) begin
+                hcrst_counter <= hcrst_counter - 1;
+            end else begin
+                is_in_hcrst   <= 1'b0;
+                usbcmd_reg[1] <= 1'b0; // El hardware limpia el bit HCRST para finalizar el handshake
             end
-        end else begin
-            // --- Lógica de Pipeline ---
-            drd_req_ctx   <= rd_req_ctx;
-            drd_req_addr  <= rd_req_addr;
-            drd_req_valid <= rd_req_valid;
-            dwr_addr      <= wr_addr;
-            dwr_data      <= wr_data;
-            dwr_valid     <= wr_valid;
-
-            // --- Lógica de Handshake de HCRST (basada en el mmiotrace) ---
-            if (hcrst_write_req && !is_in_hcrst) begin
-                is_in_hcrst <= 1'b1;
-                hcrst_counter <= 8'd20; // Breve retardo para el pulso de reset
-                // **Reset de Estado Completo**
-                usbcmd_reg    <= 32'h00000002; // Mantenemos HCRST a 1
-                usbsts_reg    <= 32'h00000001; // Halted y listo
-                crcr_reg      <= 64'h0;
-                dcbaap_reg    <= 64'h0;
-                config_reg    <= 32'h0;
-                iman0_reg     <= 32'h0;
-                imod0_reg     <= 32'h00000FA0;
-                erstsz0_reg   <= 32'h0;
-                erstba0_reg   <= 64'h0;
-                erdp0_reg     <= 64'h0;
-            end else if (is_in_hcrst) begin
-                // Estamos en medio del reset, mantenemos HCRST a 1 y contamos hacia atrás
-                if (hcrst_counter > 0) begin
-                    hcrst_counter <= hcrst_counter - 1;
-                end else begin // <<< SYNTAX CORREGIDA
-                    is_in_hcrst   <= 1'b0;
-                    usbcmd_reg[1] <= 1'b0; // El hardware limpia el bit HCRST para finalizar el handshake
-                end
-            end else if (dwr_valid) begin
-                // --- Lógica de Escritura Normal (cuando no hay reset) ---
-                case (((dwr_addr - (base_address_register & 32'hFFFFE000)) & 32'h1FFF))
+        end else if (dwr_valid) begin
+            // --- Lógica de Escritura Normal (cuando no hay reset) ---
+            case (((dwr_addr - (base_address_register & 32'hFFFFE000)) & 32'h1FFF))
                 16'h0020: usbcmd_reg <= dwr_data;
                 16'h0024: usbsts_reg <= usbsts_reg & ~dwr_data;
                 16'h0038: crcr_reg[31:0]     <= dwr_data;
@@ -967,48 +955,33 @@ end
                 16'h0058: config_reg         <= dwr_data;
                 16'h0418: reg_0x418          <= dwr_data;
                 
-                // Puerto 1
+                // Puertos 1-8
                 16'h0420: portsc1_reg <= (portsc1_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0424: portpmsc1_reg <= dwr_data;
                 16'h0428: portli1_reg <= dwr_data;
-            
-                // Puerto 2
                 16'h0430: portsc2_reg <= (portsc2_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0434: portpmsc2_reg <= dwr_data;
                 16'h0438: portli2_reg <= dwr_data;
-                
-                // Puerto 3
                 16'h0440: portsc3_reg <= (portsc3_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0444: portpmsc3_reg <= dwr_data;
                 16'h0448: portli3_reg <= dwr_data;
-                
-                // Puerto 4
                 16'h0450: portsc4_reg <= (portsc4_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0454: portpmsc4_reg <= dwr_data;
                 16'h0458: portli4_reg <= dwr_data;
-                
-                // Puerto 5
                 16'h0460: portsc5_reg <= (portsc5_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0464: portpmsc5_reg <= dwr_data;
                 16'h0468: portli5_reg <= dwr_data;
-                
-                // Puerto 6
                 16'h0470: portsc6_reg <= (portsc6_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0474: portpmsc6_reg <= dwr_data;
                 16'h0478: portli6_reg <= dwr_data;
-                
-                // Puerto 7
                 16'h0480: portsc7_reg <= (portsc7_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0484: portpmsc7_reg <= dwr_data;
                 16'h0488: portli7_reg <= dwr_data;
-                
-                // Puerto 8
                 16'h0490: portsc8_reg <= (portsc8_reg & ~32'h00FE0002) | (dwr_data & 32'h00FE0002) & ~(dwr_data & 32'h00FE0000);
                 16'h0494: portpmsc8_reg <= dwr_data;
                 16'h0498: portli8_reg <= dwr_data;
-                
-                
-                // Registros de Runtime (MOVIDOS AQUÍ)
+
+                // Registros de Runtime
                 16'h0620: iman0_reg          <= dwr_data;
                 16'h0624: imod0_reg          <= dwr_data;
                 16'h0628: erstsz0_reg        <= dwr_data;
@@ -1016,12 +989,12 @@ end
                 16'h0634: erstba0_reg[63:32] <= dwr_data;
                 16'h0638: erdp0_reg[31:0]    <= dwr_data;
                 16'h063C: erdp0_reg[63:32]   <= dwr_data;
+
+                // Tabla MSI-X
                 16'h1000: msix_addr_table[0][31:0] <= dwr_data;
                 16'h1004: msix_addr_table[0][63:32] <= dwr_data;
                 16'h1008: msix_data_table[0] <= dwr_data;
                 16'h100C: msix_ctrl_table[0] <= dwr_data;
-                
-                // Lógica para el Vector 1
                 16'h1010: msix_addr_table[1][31:0] <= dwr_data;
                 16'h1014: msix_addr_table[1][63:32] <= dwr_data;
                 16'h1018: msix_data_table[1] <= dwr_data;
@@ -1063,18 +1036,17 @@ end
                 16'h1078: msix_data_table[7] <= dwr_data;
                 16'h107C: msix_ctrl_table[7] <= dwr_data;
                 
-                
-            default: ;
-        endcase
-            end
-            
-            // --- Lógica de Estado Continua ---
-            if (!is_in_hcrst) begin
-                usbsts_reg[0]  <= ~usbcmd_reg[0]; // HCHalted es el inverso de Run/Stop
-            end
+                default: ;
+            endcase
         end
-
+        
+        // --- Lógica de Estado Continua (depende de otros registros) ---
+        if (!is_in_hcrst) begin
+            usbsts_reg[0] <= ~usbcmd_reg[0]; // HCHalted es el inverso de Run/Stop
+        end
+        
         // --- Lógica de Lectura y Respuesta ---
+        // (Esto es combinacional, pero se mantiene en el bloque secuencial como en el original para minimizar cambios)
         rd_rsp_valid <= drd_req_valid;
         rd_rsp_ctx   <= drd_req_ctx;
 
@@ -1082,29 +1054,29 @@ end
             case (((drd_req_addr - (base_address_register & 32'hFFFFE000)) & 32'h1FFF))
                 // Espacio de Capacidades
                 16'h0000: rd_rsp_data <= 32'h01000020;
-                16'h0004: rd_rsp_data <= 32'h08000822;  // 2 puertos USB 3.0
+                16'h0004: rd_rsp_data <= 32'h08000822;
                 16'h0008: rd_rsp_data <= 32'h24000011;
                 16'h000C: rd_rsp_data <= 32'h00000000;
-                16'h0010: rd_rsp_data <= 32'h014051CF; // xECP
+                16'h0010: rd_rsp_data <= 32'h014051CF;
                 16'h0014: rd_rsp_data <= 32'h00000800;
                 16'h0018: rd_rsp_data <= 32'h00000600;
                 16'h0418: rd_rsp_data <= (dwr_valid && (((dwr_addr - (base_address_register & 32'hFFFFE000)) & 32'h1FFF) == 16'h0418)) ? dwr_data : 32'h00000001;
+                
                 // Registros Operacionales
                 16'h0020: rd_rsp_data <= usbcmd_reg;
                 16'h0024: rd_rsp_data <= usbsts_reg;
-                16'h0028: rd_rsp_data <= 32'h00000001; // PAGESIZE (valor de la traza)
+                16'h0028: rd_rsp_data <= 32'h00000001;
                 16'h0038: rd_rsp_data <= crcr_reg[31:0];
                 16'h003C: rd_rsp_data <= crcr_reg[63:32];
                 16'h0050: rd_rsp_data <= dcbaap_reg[31:0];
                 16'h0054: rd_rsp_data <= dcbaap_reg[63:32];
                 16'h0058: rd_rsp_data <= config_reg;
                 
-                
-                // Puerto 1 (offset 0x420)
+                // Puertos 1-8
                 16'h0420: rd_rsp_data <= portsc1_reg;
                 16'h0424: rd_rsp_data <= portpmsc1_reg;
                 16'h0428: rd_rsp_data <= portli1_reg;
-                16'h042C: rd_rsp_data <= 32'h0;  // Reservado
+                16'h042C: rd_rsp_data <= 32'h0;
                 
                 // Puerto 2 (offset 0x430)  
                 16'h0430: rd_rsp_data <= portsc2_reg;
@@ -1146,9 +1118,8 @@ end
                 16'h0490: rd_rsp_data <= portsc8_reg;
                 16'h0494: rd_rsp_data <= portpmsc8_reg;
                 16'h0498: rd_rsp_data <= portli8_reg;
-                16'h049C: rd_rsp_data <= 32'h0;  // Reservado
-                
-                
+                16'h049C: rd_rsp_data <= 32'h0;
+
                 // Registros de Runtime
                 16'h0620: rd_rsp_data <= iman0_reg;
                 16'h0624: rd_rsp_data <= imod0_reg;
@@ -1158,7 +1129,7 @@ end
                 16'h0638: rd_rsp_data <= erdp0_reg[31:0];
                 16'h063C: rd_rsp_data <= erdp0_reg[63:32];
                 
-                // Capacidades Extendidas
+                // Capacidades Extendidas y Tabla MSI-X
                 16'h0500: rd_rsp_data <= 32'h01000401;
                 16'h0510: rd_rsp_data <= 32'h03000502;
                 16'h0514: rd_rsp_data <= 32'h20425355;
@@ -1167,11 +1138,11 @@ end
                 16'h0528: rd_rsp_data <= 32'h20425355;
                 16'h052C: rd_rsp_data <= 32'h00000405;
                 
-                16'h0800: rd_rsp_data <= msix_addr_table[0][31:0];   // MSI-X addr low
-                16'h0804: rd_rsp_data <= msix_addr_table[0][63:32];  // MSI-X addr high
-                16'h0808: rd_rsp_data <= msix_data_table[0];         // MSI-X data
-                16'h080C: rd_rsp_data <= msix_ctrl_table[0];         // MSI-X control
-                16'h0810: rd_rsp_data <= {timer_counter[26:0], 5'h0}; // Timer actual
+                16'h0800: rd_rsp_data <= msix_addr_table[0][31:0];
+                16'h0804: rd_rsp_data <= msix_addr_table[0][63:32];
+                16'h0808: rd_rsp_data <= msix_data_table[0];
+                16'h080C: rd_rsp_data <= msix_ctrl_table[0];
+                16'h0810: rd_rsp_data <= {timer_counter[26:0], 5'h0};
                 
                 16'h1000: rd_rsp_data <= msix_addr_table[0][31:0];
                 16'h1004: rd_rsp_data <= msix_addr_table[0][63:32];
@@ -1220,12 +1191,14 @@ end
                 16'h1078: rd_rsp_data <= msix_data_table[7];
                 16'h107C: rd_rsp_data <= msix_ctrl_table[7];
                 
-                default:  rd_rsp_data <= 32'h0;
+                default: rd_rsp_data <= 32'h0;
             endcase
         end else begin
             rd_rsp_data <= 32'h0;
         end
-    end   
+    end
+end
+
 endmodule
 
 
