@@ -822,6 +822,8 @@ module pcileech_bar_impl_bar0 (
     reg [31:0] msix_ctrl_table [0:7];
     reg [26:0] timer_counter;          // Un contador de 27 bits para el temporizador
     reg        trigger_interrupt_event;  // El pulso que genera el temporizador
+    reg [3:0]  msix_pulse_counter;
+
 
     wire hcrst_write_req = dwr_valid && (((dwr_addr - (base_address_register & 32'hFFFFE000)) & 32'h1FFF) == 16'h0020) && dwr_data[1];
 
@@ -852,23 +854,26 @@ module pcileech_bar_impl_bar0 (
 end
 
 always @(posedge clk) begin
-    // Por defecto, la petición está desactivada
-    msix_req <= 1'b0;
-
     if (rst) begin
+        msix_pulse_counter <= 0;
+        msix_req <= 1'b0;
         msi_address <= 32'h0;
-        msi_vector  <= 32'h0;
-    end else if (trigger_interrupt_event) begin
-        // Comprobamos si el vector 0 está habilitado (desenmascarado)
-        if (~msix_ctrl_table[0][0]) begin
-            msi_address <= msix_addr_table[0][31:0];
-            msi_vector  <= msix_data_table[0];
-            msix_req    <= 1'b1; // <-- ¡AQUÍ ESTÁ! Generamos el pulso de petición
-        end
+        msi_vector <= 32'h0;
+    end else if (trigger_interrupt_event && ~msix_ctrl_table[0][0]) begin
+        msix_pulse_counter <= 4'hF;  // Pulso de 16 ciclos (~160ns)
+        msix_req <= 1'b1;
+        msi_address <= msix_addr_table[0][31:0];
+        msi_vector <= msix_data_table[0];
+    end else if (msix_pulse_counter > 0) begin
+        msix_pulse_counter <= msix_pulse_counter - 1;
+        msix_req <= 1'b1;
+        // Mantener direcciones durante el pulso
+        msi_address <= msix_addr_table[0][31:0];
+        msi_vector <= msix_data_table[0];
     end else begin
-        // Si no hay evento de disparo, las salidas están a cero.
+        msix_req <= 1'b0;
         msi_address <= 32'h0;
-        msi_vector  <= 32'h0;
+        msi_vector <= 32'h0;
     end
 end
 
@@ -1165,6 +1170,13 @@ end
                 16'h0524: rd_rsp_data <= 32'h02000702;
                 16'h0528: rd_rsp_data <= 32'h20425355;
                 16'h052C: rd_rsp_data <= 32'h00000405;
+                
+                16'h0800: rd_rsp_data <= msix_addr_table[0][31:0];   // MSI-X addr low
+                16'h0804: rd_rsp_data <= msix_addr_table[0][63:32];  // MSI-X addr high
+                16'h0808: rd_rsp_data <= msix_data_table[0];         // MSI-X data
+                16'h080C: rd_rsp_data <= msix_ctrl_table[0];         // MSI-X control
+                16'h0810: rd_rsp_data <= {timer_counter[26:0], 5'h0}; // Timer actual
+                
                 16'h1000: rd_rsp_data <= msix_addr_table[0][31:0];
                 16'h1004: rd_rsp_data <= msix_addr_table[0][63:32];
                 16'h1008: rd_rsp_data <= msix_data_table[0];
